@@ -160,5 +160,6 @@ The design I'd move to: fetch and classification in a Lambda behind a queue, res
 
 ## Screenshots
 
-![Zap steps 1-4](screenshots/zap-canvas-1.png)
-![Zap steps 5-8](screenshots/zap-canvas-2.png)
+![Zap steps 1-4](screenshots/zap_canvas_1.png)
+![Zap steps 5-8](screenshots/zap_canvas_2.png)
+![Zap full pipeline] (screenshots/Creator_Content_Tracker - canvas.png)
