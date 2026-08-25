@@ -160,6 +160,10 @@ The design I'd move to: fetch and classification in a Lambda behind a queue, res
 
 ## Screenshots
 
-![Zap steps 1-4](screenshots/zap_canvas_1.png)
-![Zap steps 5-8](screenshots/zap_canvas_2.png)
-![Zap full pipeline] (screenshots/Creator_Content_Tracker - canvas.png)
+## Screenshots
+
+![Full pipeline — all 8 steps](screenshots/creator-content-tracker-canvas.png)
+
+![Steps 1–4: schedule, fetch, creator lookup, filter](screenshots/zap_canvas_1.png)
+
+![Steps 5–8: AI classification, parsing, ROI, write](screenshots/zap_canvas_2.png)
