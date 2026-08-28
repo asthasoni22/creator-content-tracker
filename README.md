@@ -213,4 +213,11 @@ The design I'd move to: fetch and classification in a Lambda behind a queue, res
 
 ![Full pipeline — all 8 steps](screenshots/creator-content-tracker-canvas.png)
 
+The Creators table (creators_table.png) — the roster, maintained by hand. Payout rate and brand keywords
+live here rather than in Posts, so changing a rate doesn't rewrite history. Netflix
+is set to `paused` deliberately, to give the filter at step 4 something to drop.
+
+The Posts table after 3 runs (posts_table.pdf) — one row per video, populated end to end. Engagement
+metrics from the YouTube API, the classifier's verdicts, and computed
+cost-per-engagement in the same row.
 
