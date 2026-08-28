@@ -1,3 +1,7 @@
+# No need for this code, as the AI by Zapier step already outputs 
+# the data in the format required by the Create Table step, so I can pass it directly.
+
+
 # Runs inside a Zapier "Code by Zapier" (Python) step — not standalone.
 # Reads input_data: ai_response (raw text from the AI classifier step).
 # Returns `output` dict: brand_mentioned, disclosure_present, ai_confidence, parse_ok.
