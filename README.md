@@ -1,6 +1,6 @@
 # Creator Content Tracker
 
-An automated pipeline that tracks influencer content on YouTube, joins it against internal campaign data, and computes cost-per-engagement — without anyone opening a spreadsheet.
+An automated pipeline that tracks influencer content on YouTube, joins it against internal campaign data, and computes cost-per-engagement, without anyone opening a spreadsheet.
 
 Built in Zapier with custom Python steps. Weekend project to get hands-on with low-code automation platforms.
 
@@ -22,12 +22,13 @@ This automates the whole loop.
 3. Zapier Tables           look up the creator in the roster
 4. Filter by Zapier        continue only for active campaigns
 5. AI by Zapier            classify brand mention + sponsorship disclosure
-6. Code by Zapier          parse the LLM response into structured fields
-7. Code by Zapier          compute cost-per-engagement
-8. Zapier Tables           write one row per video
+6. Code by Zapier          compute cost-per-engagement
+7. Zapier Tables           write one row per video
 ```
 
-Step 2 returns a list, so Zapier fans out — steps 3 through 8 run once per video.
+Step 2 returns a list, so Zapier fans out — steps 3 through 7 run once per video.
+
+This was originally eight steps. See [What changed](#what-changed-and-why) below.
 
 ### Why three API calls
 
@@ -55,6 +56,54 @@ Two tables, joined on `channel_id`.
 
 The split matters: the YouTube API knows views, and only the internal table knows what was paid. Keeping payout rates out of the Posts table means renegotiating a rate doesn't require rewriting historical rows. The join is where ROI becomes computable at all.
 
+### A note on column types
+
+`brand_mentioned` and `disclosure_present` are **text columns, not checkboxes**. This was a bug before it was a decision.
+
+A Zapier Tables checkbox column coerces any non-empty string to `true`. The classifier returns `"no"` — a non-empty string — so every row came back checked. Worse, so did `"pending"`. A boolean column can only represent two states, and this data has three: yes, no, and we-don't-know. Text preserves the third.
+
+---
+
+## What changed, and why
+
+The pipeline shipped at seven steps rather than the eight it was designed with. Two of the changes came out of debugging, and both are more interesting than the original design.
+
+### The AI parse step was deleted
+
+The original step 6 took the raw response from AI by Zapier, extracted the JSON, and mapped the values into `brand_mentioned`, `disclosure_present`, and `ai_confidence`.
+
+It shouldn't have existed. AI by Zapier already parses its own structured output and exposes each field as an individual data pill — `Brand Mentioned`, `Confidence Level`, `Disclosure Present`. They map straight into the Create Record step. I'd written a parser for a response that had already been parsed for me, because I assumed the integration behaved like a raw API call rather than reading what it actually returned.
+
+The code is still in the repo at `zapier/02_parse_ai_response.py`, marked as unused. It's kept because the bug it hid is worth documenting.
+
+### The bug it hid
+
+The parser fed on `Object.to_json(Raw Output)`, which is the *entire* API response wrapper rather than the model's answer. `json.loads` succeeded on it. `parse_ok` was set to `True`. But the keys the parser wanted were nested one level deeper, so every lookup returned `None`, every field fell back to `pending`, and **nothing threw an exception**. The pipeline reported success while writing empty verdicts.
+
+That's the failure mode worth remembering: not a crash, but a step that succeeds at the wrong thing. `parse_ok` was measuring whether the JSON was valid, not whether the fields were found. A truthful health check would have validated the keys, not the syntax.
+
+### The keys were renamed underneath me
+
+Once the nesting was fixed, the parser still failed. The prompt asked for `brand_mentioned` and `confidence`; the platform returned `"Brand Mentioned"` and `"Confidence Level"` — title-cased and spaced, regardless of what the prompt specified.
+
+The general defence is to normalise keys at the boundary rather than trusting a contract you don't control:
+
+```python
+def norm_keys(d):
+    return {
+        str(k).strip().lower().replace(" ", "_").replace("-", "_"): v
+        for k, v in d.items()
+    }
+```
+
+In this pipeline that turned out to be unnecessary, because mapping the pills directly sidesteps the key names entirely. It's recorded here because the underlying problem — an upstream integration silently changing its output shape — is a real one, and the parser file demonstrates the fix.
+
+### What was lost by deleting the step
+
+The `pending` fallback. With the pills mapped directly, a failed classification writes an empty cell rather than an explicit `pending`. Empty is still distinguishable from `no`, so the compliance logic survives, but the intent is now implicit rather than stated.
+
+A production version would keep a thin normaliser — not to parse anything, just to map unexpected values (`"unclear"`, `"N/A"`, empty) to an explicit `pending` before they reach the table.
+
 ---
 
 ## Reliability decisions
@@ -69,9 +118,7 @@ The parts of this that aren't the happy path:
 
 **Divide-by-zero guard on cost-per-engagement.** A video fetched minutes after upload genuinely has zero engagements. Returns `None` rather than throwing.
 
-**Classification failures record `pending`, never `no`.** If the LLM returns unparseable output and the row is written as "no disclosure found," a compliance report shows a clean result for a check that never completed. `pending` keeps "we didn't find out" distinguishable from "we looked and found nothing."
-
-**JSON extraction is defensive.** The prompt asks for bare JSON; models wrap it in code fences anyway. The parser slices from the first `{` to the last `}` rather than trying to enumerate every fence variant.
+**Classification failures must never record `no`.** If the classifier fails and the row says "no disclosure found," a compliance report shows a clean result for a check that never ran. The distinction between "we looked and found nothing" and "we didn't find out" has to survive into the table.
 
 **Missing descriptions fall back to the title, and say so.** Around a third of sampled videos had empty descriptions. Rather than generating a synthetic description — which would put fabricated text next to real API data with no way to tell them apart — the classifier analyses the title and stores `text_source: title_fallback`. A `no` verdict from a title alone is weaker evidence than one from a full description, and that column is what preserves the difference.
 
@@ -103,15 +150,17 @@ The two large accounts are brand channels pushing catalogue content, not creator
 │   └── youtube_creator_fetch.py     standalone — validates the API layer
 ├── zapier/
 │   ├── 01_fetch_youtube.py          Code step 2
-│   ├── 02_parse_ai_response.py      Code step 6
-│   ├── 03_cost_per_engagement.py    Code step 7
+│   ├── 02_parse_ai_response.py      UNUSED — see "What changed"
+│   ├── 03_cost_per_engagement.py    Code step 6
 │   └── prompt.md                    the classifier prompt
 └── screenshots/
 ```
 
-Files under `zapier/` are not standalone scripts. They run inside Zapier's Python runtime, read a global `input_data` dict, and assign to a global `output`. Numbered in execution order.
+Files under `zapier/` are not standalone scripts. They run inside Zapier's Python runtime, read a global `input_data` dict, and assign to a global `output`.
 
-`prompt.md` is versioned alongside the parser deliberately — the JSON shape in the prompt and the parser that consumes it are coupled, and a change to one requires a change to the other.
+`02_parse_ai_response.py` is not in the live pipeline. It's kept for the debugging history documented above.
+
+`prompt.md` is versioned alongside the code deliberately. Prompts are configuration, and the JSON shape requested in the prompt is a contract the rest of the pipeline depends on.
 
 ---
 
@@ -132,6 +181,8 @@ The local script exists as a test harness: when something misbehaves inside Zapi
 
 Known gaps, roughly in the order I'd fix them.
 
+**No ground truth for the classifier.** Brand mention and disclosure detection are compliance signals, and right now there's no way to say how accurate they are. The fix is a hand-labelled evaluation set — a hundred videos, half known-sponsored — measured for precision and recall. A missed disclosure is a legal problem and a false flag costs thirty seconds of review, so the threshold should be tuned asymmetrically to over-flag and route uncertain cases to a human.
+
 **The channel roster is a static input.** Adding a creator currently means editing the Zap rather than adding a row to Creators. The fix is a Find Records lookup ahead of step 2 that reads active creators at runtime — which also stops the pipeline spending API quota on paused campaigns before discarding them at step 4.
 
 **Unmatched channels drop silently.** A video from a channel missing from the roster fails the filter and disappears with no trace. This should be a Path routing to a Slack alert, not a silent drop. Failures should be loud.
@@ -150,7 +201,7 @@ Three hard ceilings, all in Zapier rather than the logic:
 
 **30-second cap on Code steps.** At roughly two sequential API calls per channel, the fetch tops out around 10–15 channels per run.
 
-**Task cost scales linearly with volume.** The fan-out means every video consumes a task at each of steps 3–8. Twenty videos is over a hundred tasks per run; two thousand creators is not viable on any Zapier plan.
+**Task cost scales linearly with volume.** The fan-out means every video consumes a task at each of steps 3–7. Twenty videos is over a hundred tasks per run; two thousand creators is not viable on any Zapier plan.
 
 **No queue or backpressure.** A failed run doesn't retry the individual records that failed.
 
