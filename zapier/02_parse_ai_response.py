@@ -1,5 +1,7 @@
-# No need for this code, as the AI by Zapier step already outputs 
-# the data in the format required by the Create Table step, so I can pass it directly.
+# UNUSED — not in the live pipeline.
+# AI by Zapier exposes its structured output as individual data pills, which
+# map directly into the Create Record step. This parser was written before I
+# realised that. Kept for the debugging history in the README.
 
 
 # Runs inside a Zapier "Code by Zapier" (Python) step — not standalone.
